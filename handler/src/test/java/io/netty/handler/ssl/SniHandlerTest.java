@@ -5,7 +5,7 @@
  * version 2.0 (the "License"); you may not use this file except in compliance
  * with the License. You may obtain a copy of the License at:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
@@ -18,11 +18,11 @@ package io.netty.handler.ssl;
 
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.CoreMatchers.nullValue;
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.junit.Assume.assumeTrue;
@@ -341,6 +341,47 @@ public class SniHandlerTest {
             assertThat(handler.sslContext(), is(nettyContext));
         } finally {
             releaseAll(leanContext, leanContext2, nettyContext);
+        }
+    }
+
+    @Test(timeout = 10000)
+    public void testMajorVersionNot3() throws Exception {
+        SslContext nettyContext = makeSslContext(provider, false);
+
+        try {
+            DomainNameMapping<SslContext> mapping = new DomainNameMappingBuilder<SslContext>(nettyContext).build();
+
+            SniHandler handler = new SniHandler(mapping);
+            EmbeddedChannel ch = new EmbeddedChannel(handler);
+
+            // invalid
+            byte[] message = {22, 2, 0, 0, 0};
+            try {
+                // Push the handshake message.
+                ch.writeInbound(Unpooled.wrappedBuffer(message));
+                // TODO(scott): This should fail because the engine should reject zero length records during handshake.
+                // See https://github.com/netty/netty/issues/6348.
+                // fail();
+            } catch (Exception e) {
+                // expected
+            }
+
+            ch.close();
+
+            // Consume all the outbound data that may be produced by the SSLEngine.
+            for (;;) {
+                ByteBuf buf = ch.readOutbound();
+                if (buf == null) {
+                    break;
+                }
+                buf.release();
+            }
+
+            assertThat(ch.finish(), is(false));
+            assertThat(handler.hostname(), nullValue());
+            assertThat(handler.sslContext(), is(nettyContext));
+        } finally {
+            releaseAll(nettyContext);
         }
     }
 
