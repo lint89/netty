@@ -5,7 +5,7 @@
  * version 2.0 (the "License"); you may not use this file except in compliance
  * with the License. You may obtain a copy of the License at:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
@@ -24,7 +24,6 @@ import io.netty.util.concurrent.FastThreadLocal;
 import io.netty.util.internal.InternalThreadLocalMap;
 import io.netty.util.internal.ObjectPool;
 import io.netty.util.internal.ObjectPool.Handle;
-import io.netty.util.internal.ObjectPool.ObjectCreator;
 import io.netty.util.internal.PromiseNotificationUtil;
 import io.netty.util.internal.SystemPropertyUtil;
 import io.netty.util.internal.logging.InternalLogger;
@@ -425,7 +424,7 @@ public final class ChannelOutboundBuffer {
                         //
                         // See also:
                         // - https://www.freebsd.org/cgi/man.cgi?query=write&sektion=2
-                        // - http://linux.die.net/man/2/writev
+                        // - https://linux.die.net//man/2/writev
                         break;
                     }
                     nioBufferSize += readableBytes;
@@ -452,7 +451,7 @@ public final class ChannelOutboundBuffer {
                         // branch is not very likely to get hit very frequently.
                         nioBufferCount = nioBuffers(entry, buf, nioBuffers, nioBufferCount, maxCount);
                     }
-                    if (nioBufferCount == maxCount) {
+                    if (nioBufferCount >= maxCount) {
                         break;
                     }
                 }
@@ -603,7 +602,7 @@ public final class ChannelOutboundBuffer {
             final int oldValue = unwritable;
             final int newValue = oldValue | 1;
             if (UNWRITABLE_UPDATER.compareAndSet(this, oldValue, newValue)) {
-                if (oldValue == 0 && newValue != 0) {
+                if (oldValue == 0) {
                     fireChannelWritabilityChanged(invokeLater);
                 }
                 break;
@@ -788,12 +787,7 @@ public final class ChannelOutboundBuffer {
     }
 
     static final class Entry {
-        private static final ObjectPool<Entry> RECYCLER = ObjectPool.newPool(new ObjectCreator<Entry>() {
-            @Override
-            public Entry newObject(Handle<Entry> handle) {
-                return new Entry(handle);
-            }
-        });
+        private static final ObjectPool<Entry> RECYCLER = ObjectPool.newPool(Entry::new);
 
         private final Handle<Entry> handle;
         Entry next;

@@ -5,7 +5,7 @@
  * version 2.0 (the "License"); you may not use this file except in compliance
  * with the License. You may obtain a copy of the License at:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
@@ -76,12 +76,23 @@ public abstract class HttpContentDecoder extends MessageToMessageDecoder<HttpObj
             cleanup();
             final HttpMessage message = (HttpMessage) msg;
             final HttpHeaders headers = message.headers();
-             // Determine the content encoding.
+
+            // Determine the content encoding.
             String contentEncoding = headers.get(HttpHeaderNames.CONTENT_ENCODING);
             if (contentEncoding != null) {
                 contentEncoding = contentEncoding.trim();
             } else {
-                contentEncoding = IDENTITY;
+                String transferEncoding = headers.get(HttpHeaderNames.TRANSFER_ENCODING);
+                if (transferEncoding != null) {
+                    int idx = transferEncoding.indexOf(",");
+                    if (idx != -1) {
+                        contentEncoding = transferEncoding.substring(0, idx).trim();
+                    } else {
+                        contentEncoding = transferEncoding.trim();
+                    }
+                } else {
+                    contentEncoding = IDENTITY;
+                }
             }
             decoder = newContentDecoder(contentEncoding);
 
@@ -108,7 +119,7 @@ public abstract class HttpContentDecoder extends MessageToMessageDecoder<HttpObj
             CharSequence targetContentEncoding = getTargetContentEncoding(contentEncoding);
             if (HttpHeaderValues.IDENTITY.contentEquals(targetContentEncoding)) {
                 // Do NOT set the 'Content-Encoding' header if the target encoding is 'identity'
-                // as per: http://tools.ietf.org/html/rfc2616#section-14.11
+                // as per: https://tools.ietf.org/html/rfc2616#section-14.11
                 headers.remove(HttpHeaderNames.CONTENT_ENCODING);
             } else {
                 headers.set(HttpHeaderNames.CONTENT_ENCODING, targetContentEncoding);

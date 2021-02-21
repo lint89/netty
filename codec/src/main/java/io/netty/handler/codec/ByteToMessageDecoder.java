@@ -5,7 +5,7 @@
  * version 2.0 (the "License"); you may not use this file except in compliance
  * with the License. You may obtain a copy of the License at:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
@@ -154,10 +154,6 @@ public abstract class ByteToMessageDecoder extends ChannelHandlerAdapter {
         }
     };
 
-    private static final byte STATE_INIT = 0;
-    private static final byte STATE_CALLING_CHILD_DECODE = 1;
-    private static final byte STATE_HANDLER_REMOVED_PENDING = 2;
-
     ByteBuf cumulation;
     private Cumulator cumulator = MERGE_CUMULATOR;
     private boolean singleDecode;
@@ -169,15 +165,6 @@ public abstract class ByteToMessageDecoder extends ChannelHandlerAdapter {
      */
     private boolean firedChannelRead;
 
-    /**
-     * A bitmask where the bits are defined as
-     * <ul>
-     *     <li>{@link #STATE_INIT}</li>
-     *     <li>{@link #STATE_CALLING_CHILD_DECODE}</li>
-     *     <li>{@link #STATE_HANDLER_REMOVED_PENDING}</li>
-     * </ul>
-     */
-    private byte decodeState = STATE_INIT;
     private int discardAfterReads = 16;
     private int numReads;
     private ByteToMessageDecoderContext context;
@@ -257,10 +244,6 @@ public abstract class ByteToMessageDecoder extends ChannelHandlerAdapter {
 
     @Override
     public final void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
-        if (decodeState == STATE_CALLING_CHILD_DECODE) {
-            decodeState = STATE_HANDLER_REMOVED_PENDING;
-            return;
-        }
         ByteBuf buf = cumulation;
         if (buf != null) {
             // Directly set this to null so we are sure we not access it in any other method here anymore.
@@ -353,6 +336,7 @@ public abstract class ByteToMessageDecoder extends ChannelHandlerAdapter {
 
     @Override
     public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
+        ctx.fireUserEventTriggered(evt);
         if (evt instanceof ChannelInputShutdownEvent) {
             // The decodeLast method is invoked when a channelInactive event is encountered.
             // This method is responsible for ending requests in some situations and must be called
@@ -360,7 +344,6 @@ public abstract class ByteToMessageDecoder extends ChannelHandlerAdapter {
             assert context.ctx == ctx || ctx == context;
             channelInputClosed(context, false);
         }
-        ctx.fireUserEventTriggered(evt);
     }
 
     private void channelInputClosed(ByteToMessageDecoderContext ctx, boolean callChannelInactive) {
@@ -393,7 +376,14 @@ public abstract class ByteToMessageDecoder extends ChannelHandlerAdapter {
     void channelInputClosed(ByteToMessageDecoderContext ctx) throws Exception {
         if (cumulation != null) {
             callDecode(ctx, cumulation);
-            decodeLast(ctx, cumulation);
+            // If callDecode(...) removed the handle from the pipeline we should not call decodeLast(...) as this would
+            // be unexpected.
+            if (!ctx.isRemoved()) {
+                // Use Unpooled.EMPTY_BUFFER if cumulation become null after calling callDecode(...).
+                // See https://github.com/netty/netty/issues/10802.
+                ByteBuf buffer = cumulation == null ? Unpooled.EMPTY_BUFFER : cumulation;
+                decodeLast(ctx, buffer);
+            }
         } else {
             decodeLast(ctx, Unpooled.EMPTY_BUFFER);
         }
@@ -469,16 +459,7 @@ public abstract class ByteToMessageDecoder extends ChannelHandlerAdapter {
      */
     final void decodeRemovalReentryProtection(ChannelHandlerContext ctx, ByteBuf in)
             throws Exception {
-        decodeState = STATE_CALLING_CHILD_DECODE;
-        try {
-            decode(ctx, in);
-        } finally {
-            boolean removePending = decodeState == STATE_HANDLER_REMOVED_PENDING;
-            decodeState = STATE_INIT;
-            if (removePending) {
-                handlerRemoved(ctx);
-            }
-        }
+        decode(ctx, in);
     }
 
     /**

@@ -5,7 +5,7 @@
  * version 2.0 (the "License"); you may not use this file except in compliance
  * with the License. You may obtain a copy of the License at:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
@@ -16,6 +16,8 @@
 
 package io.netty.handler.ssl;
 
+import io.netty.handler.ssl.util.KeyManagerFactoryWrapper;
+import io.netty.handler.ssl.util.TrustManagerFactoryWrapper;
 import io.netty.util.internal.UnstableApi;
 
 import javax.net.ssl.KeyManager;
@@ -63,8 +65,13 @@ public final class SslContextBuilder {
     /**
      * Creates a builder for new server-side {@link SslContext}.
      *
-     * @param keyCertChainInputStream an input stream for an X.509 certificate chain in PEM format
-     * @param keyInputStream an input stream for a PKCS#8 private key in PEM format
+     * @param keyCertChainInputStream   an input stream for an X.509 certificate chain in PEM format. The caller is
+     *                                  responsible for calling {@link InputStream#close()} after {@link #build()}
+     *                                  has been called.
+     * @param keyInputStream            an input stream for a PKCS#8 private key in PEM format. The caller is
+     *                                  responsible for calling {@link InputStream#close()} after {@link #build()}
+     *                                  has been called.
+     *
      * @see #keyManager(InputStream, InputStream)
      */
     public static SslContextBuilder forServer(InputStream keyCertChainInputStream, InputStream keyInputStream) {
@@ -110,8 +117,12 @@ public final class SslContextBuilder {
     /**
      * Creates a builder for new server-side {@link SslContext}.
      *
-     * @param keyCertChainInputStream an input stream for an X.509 certificate chain in PEM format
-     * @param keyInputStream an input stream for a PKCS#8 private key in PEM format
+     * @param keyCertChainInputStream   an input stream for an X.509 certificate chain in PEM format. The caller is
+     *                                  responsible for calling {@link InputStream#close()} after {@link #build()}
+     *                                  has been called.
+     * @param keyInputStream            an input stream for a PKCS#8 private key in PEM format. The caller is
+     *                                  responsible for calling {@link InputStream#close()} after {@link #build()}
+     *                                  has been called.
      * @param keyPassword the password of the {@code keyFile}, or {@code null} if it's not
      *     password-protected
      * @see #keyManager(InputStream, InputStream, String)
@@ -165,7 +176,7 @@ public final class SslContextBuilder {
     /**
      * Creates a builder for new server-side {@link SslContext} with {@link KeyManager}.
      *
-     * @param KeyManager non-{@code null} KeyManager for server's private key
+     * @param keyManager non-{@code null} KeyManager for server's private key
      */
     public static SslContextBuilder forServer(KeyManager keyManager) {
         return new SslContextBuilder(true).keyManager(keyManager);
@@ -236,6 +247,8 @@ public final class SslContextBuilder {
     /**
      * Trusted certificates for verifying the remote endpoint's certificate. The input stream should
      * contain an X.509 certificate collection in PEM format. {@code null} uses the system default.
+     *
+     * The caller is responsible for calling {@link InputStream#close()} after {@link #build()} has been called.
      */
     public SslContextBuilder trustManager(InputStream trustCertCollectionInputStream) {
         try {
@@ -298,8 +311,12 @@ public final class SslContextBuilder {
      * Identifying certificate for this host. {@code keyCertChainInputStream} and {@code keyInputStream} may
      * be {@code null} for client contexts, which disables mutual authentication.
      *
-     * @param keyCertChainInputStream an input stream for an X.509 certificate chain in PEM format
-     * @param keyInputStream an input stream for a PKCS#8 private key in PEM format
+     * @param keyCertChainInputStream   an input stream for an X.509 certificate chain in PEM format. The caller is
+     *                                  responsible for calling {@link InputStream#close()} after {@link #build()}
+     *                                  has been called.
+     * @param keyInputStream            an input stream for a PKCS#8 private key in PEM format. The caller is
+     *                                  responsible for calling {@link InputStream#close()} after {@link #build()}
+     *                                  has been called.
      */
     public SslContextBuilder keyManager(InputStream keyCertChainInputStream, InputStream keyInputStream) {
         return keyManager(keyCertChainInputStream, keyInputStream, null);
@@ -356,8 +373,12 @@ public final class SslContextBuilder {
      * Identifying certificate for this host. {@code keyCertChainInputStream} and {@code keyInputStream} may
      * be {@code null} for client contexts, which disables mutual authentication.
      *
-     * @param keyCertChainInputStream an input stream for an X.509 certificate chain in PEM format
-     * @param keyInputStream an input stream for a PKCS#8 private key in PEM format
+     * @param keyCertChainInputStream   an input stream for an X.509 certificate chain in PEM format. The caller is
+     *                                  responsible for calling {@link InputStream#close()} after {@link #build()}
+     *                                  has been called.
+     * @param keyInputStream            an input stream for a PKCS#8 private key in PEM format. The caller is
+     *                                  responsible for calling {@link InputStream#close()} after {@link #build()}
+     *                                  has been called.
      * @param keyPassword the password of the {@code keyInputStream}, or {@code null} if it's not
      *     password-protected
      */
@@ -390,7 +411,7 @@ public final class SslContextBuilder {
     public SslContextBuilder keyManager(PrivateKey key, String keyPassword, X509Certificate... keyCertChain) {
         if (forServer) {
             requireNonNull(keyCertChain, "keyCertChain required for servers");
-            if (keyCertChain.length == 0) {
+            if (keyCertChain.length == 0) { // lgtm[java/dereferenced-value-may-be-null]
                 throw new IllegalArgumentException("keyCertChain must be non-empty");
             }
             requireNonNull(key, "key required for servers");

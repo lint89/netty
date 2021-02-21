@@ -5,7 +5,7 @@
  * version 2.0 (the "License"); you may not use this file except in compliance
  * with the License. You may obtain a copy of the License at:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
@@ -34,6 +34,7 @@ import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 
 import java.nio.channels.ClosedChannelException;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -45,7 +46,9 @@ public final class Http2StreamChannelBootstrap {
     @SuppressWarnings("unchecked")
     private static final Map.Entry<AttributeKey<?>, Object>[] EMPTY_ATTRIBUTE_ARRAY = new Map.Entry[0];
 
-    private final Map<ChannelOption<?>, Object> options = new ConcurrentHashMap<>();
+    // The order in which ChannelOptions are applied is important they may depend on each other for validation
+    // purposes.
+    private final Map<ChannelOption<?>, Object> options = new LinkedHashMap<>();
     private final Map<AttributeKey<?>, Object> attrs = new ConcurrentHashMap<>();
     private final Channel channel;
     private volatile ChannelHandler handler;
@@ -64,10 +67,13 @@ public final class Http2StreamChannelBootstrap {
     @SuppressWarnings("unchecked")
     public <T> Http2StreamChannelBootstrap option(ChannelOption<T> option, T value) {
         requireNonNull(option, "option");
-        if (value == null) {
-            options.remove(option);
-        } else {
-            options.put(option, value);
+
+        synchronized (options) {
+            if (value == null) {
+                options.remove(option);
+            } else {
+                options.put(option, value);
+            }
         }
         return this;
     }
@@ -116,7 +122,13 @@ public final class Http2StreamChannelBootstrap {
                 open0(ctx, promise);
             } else {
                 final ChannelHandlerContext finalCtx = ctx;
-                executor.execute(() -> open0(finalCtx, promise));
+                executor.execute(() -> {
+                    if (channel.isActive()) {
+                        open0(finalCtx, promise);
+                    } else {
+                        promise.setFailure(new ClosedChannelException());
+                    }
+                });
             }
         } catch (Throwable cause) {
             promise.setFailure(cause);
@@ -158,10 +170,15 @@ public final class Http2StreamChannelBootstrap {
             return;
         }
         final Http2StreamChannel streamChannel;
-        if (ctx.handler() instanceof Http2MultiplexCodec) {
-            streamChannel = ((Http2MultiplexCodec) ctx.handler()).newOutboundStream();
-        } else {
-            streamChannel = ((Http2MultiplexHandler) ctx.handler()).newOutboundStream();
+        try {
+            if (ctx.handler() instanceof Http2MultiplexCodec) {
+                streamChannel = ((Http2MultiplexCodec) ctx.handler()).newOutboundStream();
+            } else {
+                streamChannel = ((Http2MultiplexHandler) ctx.handler()).newOutboundStream();
+            }
+        } catch (Exception e) {
+            promise.setFailure(e);
+            return;
         }
         try {
             init(streamChannel);
@@ -195,7 +212,12 @@ public final class Http2StreamChannelBootstrap {
         if (handler != null) {
             p.addLast(handler);
         }
-        setChannelOptions(channel, options.entrySet().toArray(EMPTY_OPTION_ARRAY));
+        final Map.Entry<ChannelOption<?>, Object> [] optionArray;
+        synchronized (options) {
+            optionArray = options.entrySet().toArray(EMPTY_OPTION_ARRAY);
+        }
+
+        setChannelOptions(channel, optionArray);
         setAttributes(channel, attrs.entrySet().toArray(EMPTY_ATTRIBUTE_ARRAY));
     }
 

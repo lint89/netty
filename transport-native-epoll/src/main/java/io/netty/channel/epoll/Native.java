@@ -5,7 +5,7 @@
  * version 2.0 (the "License"); you may not use this file except in compliance
  * with the License. You may obtain a copy of the License at:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
@@ -17,6 +17,7 @@ package io.netty.channel.epoll;
 
 import io.netty.channel.unix.FileDescriptor;
 import io.netty.channel.unix.Socket;
+import io.netty.channel.unix.Unix;
 import io.netty.util.internal.NativeLibraryLoader;
 import io.netty.util.internal.PlatformDependent;
 import io.netty.util.internal.SystemPropertyUtil;
@@ -25,6 +26,7 @@ import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 
 import java.io.IOException;
+import java.nio.channels.Selector;
 import java.util.Locale;
 
 import static io.netty.channel.epoll.NativeStaticallyReferencedJniMethods.epollerr;
@@ -49,6 +51,16 @@ public final class Native {
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(Native.class);
 
     static {
+        Selector selector = null;
+        try {
+            // We call Selector.open() as this will under the hood cause IOUtil to be loaded.
+            // This is a workaround for a possible classloader deadlock that could happen otherwise:
+            //
+            // See https://github.com/netty/netty/issues/10187
+            selector = Selector.open();
+        } catch (IOException ignore) {
+            // Just ignore
+        }
         try {
             // First, try calling a side-effect free JNI method to see if the library was already
             // loaded by the application.
@@ -56,9 +68,24 @@ public final class Native {
         } catch (UnsatisfiedLinkError ignore) {
             // The library was not previously loaded, load it now.
             loadNativeLibrary();
+        } finally {
+            try {
+                if (selector != null) {
+                    selector.close();
+                }
+            } catch (IOException ignore) {
+                // Just ignore
+            }
         }
-        Socket.initialize();
+        Unix.registerInternal(new Runnable() {
+            @Override
+            public void run() {
+                registerUnix();
+            }
+        });
     }
+
+    private static native int registerUnix();
 
     // EventLoop operations and constants
     public static final int EPOLLIN = epollin();

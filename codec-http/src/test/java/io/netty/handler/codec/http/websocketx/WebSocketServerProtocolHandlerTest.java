@@ -5,7 +5,7 @@
  * 2.0 (the "License"); you may not use this file except in compliance with the
  * License. You may obtain a copy of the License at:
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ * https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
@@ -18,20 +18,20 @@ package io.netty.handler.codec.http.websocketx;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandler;
 import io.netty.channel.ChannelPromise;
 import io.netty.channel.embedded.EmbeddedChannel;
-import io.netty.handler.codec.http.DefaultFullHttpRequest;
-import io.netty.handler.codec.http.FullHttpRequest;
-import io.netty.handler.codec.http.FullHttpResponse;
+
 import io.netty.handler.codec.http.HttpClientCodec;
 import io.netty.handler.codec.http.HttpHeaderValues;
-import io.netty.handler.codec.http.HttpMethod;
-import io.netty.handler.codec.http.HttpObjectAggregator;
-import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.codec.http.HttpRequestDecoder;
 import io.netty.handler.codec.http.HttpResponseEncoder;
+import io.netty.handler.codec.http.FullHttpRequest;
+import io.netty.handler.codec.http.FullHttpResponse;
+import io.netty.handler.codec.http.HttpMethod;
+import io.netty.handler.codec.http.HttpRequest;
+import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
+import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.util.CharsetUtil;
 import io.netty.util.ReferenceCountUtil;
 import org.junit.Before;
@@ -67,7 +67,7 @@ public class WebSocketServerProtocolHandlerTest {
     }
 
     @Test
-    public void testWebSocketServerProtocolHandshakeHandlerReplacedBeforeHandshake() {
+    public void testWebSocketServerProtocolHandshakeHandlerRemovedAfterHandshake() {
         EmbeddedChannel ch = createChannel(new MockOutboundHandler());
         ChannelHandlerContext handshakerCtx = ch.pipeline().context(WebSocketServerProtocolHandshakeHandler.class);
         ch.pipeline().addLast(new ChannelHandler() {
@@ -75,7 +75,7 @@ public class WebSocketServerProtocolHandlerTest {
             public void userEventTriggered(ChannelHandlerContext ctx, Object evt) {
                 if (evt instanceof WebSocketServerProtocolHandler.HandshakeComplete) {
                     // We should have removed the handler already.
-                    assertNull(ctx.pipeline().context(WebSocketServerProtocolHandshakeHandler.class));
+                    ctx.executor().execute(() -> ctx.pipeline().context(WebSocketServerProtocolHandshakeHandler.class));
                 }
             }
         });
@@ -85,23 +85,6 @@ public class WebSocketServerProtocolHandlerTest {
         assertEquals(SWITCHING_PROTOCOLS, response.status());
         response.release();
         assertNotNull(WebSocketServerProtocolHandler.getHandshaker(handshakerCtx.channel()));
-        assertFalse(ch.finish());
-    }
-
-    @Test
-    public void testSubsequentHttpRequestsAfterUpgradeShouldReturn403() {
-        EmbeddedChannel ch = createChannel();
-
-        writeUpgradeRequest(ch);
-
-        FullHttpResponse response = responses.remove();
-        assertEquals(SWITCHING_PROTOCOLS, response.status());
-        response.release();
-
-        ch.writeInbound(new DefaultFullHttpRequest(HTTP_1_1, HttpMethod.GET, "/test"));
-        response = responses.remove();
-        assertEquals(FORBIDDEN, response.status());
-        response.release();
         assertFalse(ch.finish());
     }
 
@@ -208,6 +191,61 @@ public class WebSocketServerProtocolHandlerTest {
 
         assertEquals("processed: payload", customTextFrameHandler.getContent());
         assertFalse(ch.finish());
+    }
+
+    @Test
+    public void testCheckValidWebSocketPath() {
+        HttpRequest httpRequest = new WebSocketRequestBuilder().httpVersion(HTTP_1_1)
+                .method(HttpMethod.GET)
+                .uri("/test")
+                .key(HttpHeaderNames.SEC_WEBSOCKET_KEY)
+                .connection("Upgrade")
+                .upgrade(HttpHeaderValues.WEBSOCKET)
+                .version13()
+                .build();
+
+        WebSocketServerProtocolConfig config = WebSocketServerProtocolConfig.newBuilder()
+                .websocketPath("/test")
+                .checkStartsWith(true)
+                .build();
+
+        EmbeddedChannel ch = new EmbeddedChannel(
+                new WebSocketServerProtocolHandler(config),
+                new HttpRequestDecoder(),
+                new HttpResponseEncoder(),
+                new MockOutboundHandler());
+        ch.writeInbound(httpRequest);
+
+        FullHttpResponse response = responses.remove();
+        assertEquals(SWITCHING_PROTOCOLS, response.status());
+        response.release();
+    }
+
+    @Test
+    public void testCheckInvalidWebSocketPath() {
+        HttpRequest httpRequest = new WebSocketRequestBuilder().httpVersion(HTTP_1_1)
+                .method(HttpMethod.GET)
+                .uri("/testabc")
+                .key(HttpHeaderNames.SEC_WEBSOCKET_KEY)
+                .connection("Upgrade")
+                .upgrade(HttpHeaderValues.WEBSOCKET)
+                .version13()
+                .build();
+
+        WebSocketServerProtocolConfig config = WebSocketServerProtocolConfig.newBuilder()
+                .websocketPath("/test")
+                .checkStartsWith(true)
+                .build();
+
+        EmbeddedChannel ch = new EmbeddedChannel(
+                new WebSocketServerProtocolHandler(config),
+                new HttpRequestDecoder(),
+                new HttpResponseEncoder(),
+                new MockOutboundHandler());
+        ch.writeInbound(httpRequest);
+
+        ChannelHandlerContext handshakerCtx = ch.pipeline().context(WebSocketServerProtocolHandshakeHandler.class);
+        assertNull(WebSocketServerProtocolHandler.getHandshaker(handshakerCtx.channel()));
     }
 
     @Test
@@ -391,7 +429,7 @@ public class WebSocketServerProtocolHandlerTest {
         }
     }
 
-    private static class CustomTextFrameHandler implements ChannelInboundHandler {
+    private static class CustomTextFrameHandler implements ChannelHandler {
         private String content;
 
         @Override

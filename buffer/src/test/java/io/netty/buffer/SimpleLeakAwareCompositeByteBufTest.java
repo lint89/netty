@@ -5,7 +5,7 @@
  * version 2.0 (the "License"); you may not use this file except in compliance
  * with the License. You may obtain a copy of the License at:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
@@ -15,7 +15,6 @@
  */
 package io.netty.buffer;
 
-import io.netty.util.ByteProcessor;
 import io.netty.util.ResourceLeakTracker;
 import org.hamcrest.CoreMatchers;
 import org.junit.After;
@@ -25,9 +24,9 @@ import org.junit.Test;
 import java.util.ArrayDeque;
 import java.util.Queue;
 
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 
 public class SimpleLeakAwareCompositeByteBufTest extends WrappedCompositeByteBufTest {
@@ -146,12 +145,7 @@ public class SimpleLeakAwareCompositeByteBufTest extends WrappedCompositeByteBuf
         comp.addComponent(true, inner);
         buf.addComponent(true, comp);
 
-        assertEquals(-1, buf.forEachByte(new ByteProcessor() {
-            @Override
-            public boolean process(byte value) {
-                return true;
-            }
-        }));
+        assertEquals(-1, buf.forEachByte(value -> true));
         assertTrue(buf.release());
     }
 

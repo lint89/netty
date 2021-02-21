@@ -5,7 +5,7 @@
  * "License"); you may not use this file except in compliance with the License. You may obtain a
  * copy of the License at:
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ * https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software distributed under the License
  * is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
@@ -41,7 +41,6 @@ import org.junit.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
-import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
 
 import java.util.concurrent.CountDownLatch;
@@ -291,8 +290,8 @@ public class Http2ConnectionHandlerTest {
         handler = newHandler();
         handler.channelRead(ctx, copiedBuffer("BAD_PREFACE", UTF_8));
         ArgumentCaptor<ByteBuf> captor = ArgumentCaptor.forClass(ByteBuf.class);
-        verify(frameWriter).writeGoAway(any(ChannelHandlerContext.class), eq(0), eq(PROTOCOL_ERROR.code()),
-                captor.capture(), eq(promise));
+        verify(frameWriter).writeGoAway(any(ChannelHandlerContext.class),
+                eq(Integer.MAX_VALUE), eq(PROTOCOL_ERROR.code()), captor.capture(), eq(promise));
         assertEquals(0, captor.getValue().refCnt());
     }
 
@@ -302,8 +301,8 @@ public class Http2ConnectionHandlerTest {
         handler = newHandler();
         handler.channelRead(ctx, copiedBuffer("GET /path HTTP/1.1", US_ASCII));
         ArgumentCaptor<ByteBuf> captor = ArgumentCaptor.forClass(ByteBuf.class);
-        verify(frameWriter).writeGoAway(any(ChannelHandlerContext.class), eq(0), eq(PROTOCOL_ERROR.code()),
-            captor.capture(), eq(promise));
+        verify(frameWriter).writeGoAway(any(ChannelHandlerContext.class), eq(Integer.MAX_VALUE),
+                eq(PROTOCOL_ERROR.code()), captor.capture(), eq(promise));
         assertEquals(0, captor.getValue().refCnt());
         assertTrue(goAwayDebugCap.contains("/path"));
     }
@@ -319,7 +318,7 @@ public class Http2ConnectionHandlerTest {
         handler.channelRead(ctx, buf);
         ArgumentCaptor<ByteBuf> captor = ArgumentCaptor.forClass(ByteBuf.class);
         verify(frameWriter, atLeastOnce()).writeGoAway(any(ChannelHandlerContext.class),
-                eq(0), eq(PROTOCOL_ERROR.code()), captor.capture(), eq(promise));
+                eq(Integer.MAX_VALUE), eq(PROTOCOL_ERROR.code()), captor.capture(), eq(promise));
         assertEquals(0, captor.getValue().refCnt());
     }
 
@@ -366,10 +365,13 @@ public class Http2ConnectionHandlerTest {
     public void connectionErrorShouldStartShutdown() throws Exception {
         handler = newHandler();
         Http2Exception e = new Http2Exception(PROTOCOL_ERROR);
+        // There's no guarantee that lastStreamCreated in correct, as the error could have occurred during header
+        // processing before it was updated. Thus, it should _not_ be used for the GOAWAY.
+        // https://github.com/netty/netty/issues/10670
         when(remote.lastStreamCreated()).thenReturn(STREAM_ID);
         handler.exceptionCaught(ctx, e);
         ArgumentCaptor<ByteBuf> captor = ArgumentCaptor.forClass(ByteBuf.class);
-        verify(frameWriter).writeGoAway(eq(ctx), eq(STREAM_ID), eq(PROTOCOL_ERROR.code()),
+        verify(frameWriter).writeGoAway(eq(ctx), eq(Integer.MAX_VALUE), eq(PROTOCOL_ERROR.code()),
                 captor.capture(), eq(promise));
         captor.getValue().release();
     }
@@ -655,6 +657,14 @@ public class Http2ConnectionHandlerTest {
     }
 
     @Test
+    public void canCloseStreamWithVoidPromise() throws Exception {
+        handler = newHandler();
+        handler.closeStream(stream, ctx.voidPromise());
+        verify(stream, times(1)).close();
+        verifyNoMoreInteractions(stream);
+    }
+
+    @Test
     public void channelReadCompleteTriggersFlush() throws Exception {
         handler = newHandler();
         handler.channelReadComplete(ctx);
@@ -743,38 +753,23 @@ public class Http2ConnectionHandlerTest {
         when(stream.id()).thenReturn(STREAM_ID);
 
         final AtomicBoolean resetSent = new AtomicBoolean();
-        when(stream.resetSent()).then(new Answer<Http2Stream>() {
-            @Override
-            public Http2Stream answer(InvocationOnMock invocationOnMock) {
-                resetSent.set(true);
-                return stream;
-            }
+        when(stream.resetSent()).then((Answer<Http2Stream>) invocationOnMock -> {
+            resetSent.set(true);
+            return stream;
         });
-        when(stream.isResetSent()).then(new Answer<Boolean>() {
-            @Override
-            public Boolean answer(InvocationOnMock invocationOnMock) {
-                return resetSent.get();
-            }
-        });
+        when(stream.isResetSent()).then((Answer<Boolean>) invocationOnMock -> resetSent.get());
         when(frameWriter.writeRstStream(eq(ctx), eq(STREAM_ID), anyLong(), any(ChannelPromise.class)))
-                .then(new Answer<ChannelFuture>() {
-                    @Override
-                    public ChannelFuture answer(InvocationOnMock invocationOnMock) throws Throwable {
-                        ChannelPromise promise = invocationOnMock.getArgument(3);
-                        return promise.setSuccess();
-                    }
+                .then((Answer<ChannelFuture>) invocationOnMock -> {
+                    ChannelPromise promise = invocationOnMock.getArgument(3);
+                    return promise.setSuccess();
                 });
 
         ChannelPromise promise =
                 new DefaultChannelPromise(channel, ImmediateEventExecutor.INSTANCE);
         final ChannelPromise promise2 =
                 new DefaultChannelPromise(channel, ImmediateEventExecutor.INSTANCE);
-        promise.addListener(new ChannelFutureListener() {
-            @Override
-            public void operationComplete(ChannelFuture future) {
-                handler.resetStream(ctx, STREAM_ID, STREAM_CLOSED.code(), promise2);
-            }
-        });
+        promise.addListener((ChannelFutureListener) future ->
+                handler.resetStream(ctx, STREAM_ID, STREAM_CLOSED.code(), promise2));
 
         handler.resetStream(ctx, STREAM_ID, CANCEL.code(), promise);
         verify(frameWriter).writeRstStream(eq(ctx), eq(STREAM_ID), anyLong(), any(ChannelPromise.class));

@@ -5,7 +5,7 @@
  * version 2.0 (the "License"); you may not use this file except in compliance
  * with the License. You may obtain a copy of the License at:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
@@ -221,12 +221,8 @@ public class PerMessageDeflateDecoderTest {
 
     @Test
     public void testSelectivityDecompressionSkip() {
-        WebSocketExtensionFilter selectivityDecompressionFilter = new WebSocketExtensionFilter() {
-            @Override
-            public boolean mustSkip(WebSocketFrame frame) {
-                return frame instanceof TextWebSocketFrame && frame.content().readableBytes() < 100;
-            }
-        };
+        WebSocketExtensionFilter selectivityDecompressionFilter =
+                frame -> frame instanceof TextWebSocketFrame && frame.content().readableBytes() < 100;
         EmbeddedChannel encoderChannel = new EmbeddedChannel(
                 ZlibCodecFactory.newZlibEncoder(ZlibWrapper.NONE, 9, 15, 8));
         EmbeddedChannel decoderChannel = new EmbeddedChannel(
@@ -266,12 +262,7 @@ public class PerMessageDeflateDecoderTest {
 
     @Test(expected = DecoderException.class)
     public void testIllegalStateWhenDecompressionInProgress() {
-        WebSocketExtensionFilter selectivityDecompressionFilter = new WebSocketExtensionFilter() {
-            @Override
-            public boolean mustSkip(WebSocketFrame frame) {
-                return frame.content().readableBytes() < 100;
-            }
-        };
+        WebSocketExtensionFilter selectivityDecompressionFilter = frame -> frame.content().readableBytes() < 100;
 
         EmbeddedChannel encoderChannel = new EmbeddedChannel(
                 ZlibCodecFactory.newZlibEncoder(ZlibWrapper.NONE, 9, 15, 8));

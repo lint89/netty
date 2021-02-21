@@ -5,7 +5,7 @@
  * version 2.0 (the "License"); you may not use this file except in compliance
  * with the License. You may obtain a copy of the License at:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
@@ -28,6 +28,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 import static org.junit.Assert.*;
 
@@ -193,7 +194,7 @@ public class PendingWriteQueueTest {
 
     private static EmbeddedChannel newChannel() {
         // Add a handler so we can access a ChannelHandlerContext via the ChannelPipeline.
-        return new EmbeddedChannel(new ChannelHandlerAdapter() { });
+        return new EmbeddedChannel(new ChannelHandler() { });
     }
 
     @Test
@@ -232,7 +233,9 @@ public class PendingWriteQueueTest {
 
         ChannelPromise promise = channel.newPromise();
         final ChannelPromise promise3 = channel.newPromise();
-        promise.addListener((ChannelFutureListener) future -> queue.add(3L, promise3));
+        promise.addListener((ChannelFutureListener) future -> {
+            queue.add(3L, promise3);
+        });
         ChannelPromise promise2 = channel.newPromise();
 
         channel.eventLoop().execute(() -> {
@@ -245,8 +248,13 @@ public class PendingWriteQueueTest {
         assertTrue(promise.isSuccess());
         assertTrue(promise2.isDone());
         assertTrue(promise2.isSuccess());
+        assertFalse(promise3.isDone());
+        assertFalse(promise3.isSuccess());
+
+        channel.eventLoop().execute(queue::removeAndWriteAll);
         assertTrue(promise3.isDone());
         assertTrue(promise3.isSuccess());
+        channel.runPendingTasks();
         assertTrue(channel.finish());
         assertEquals(1L, (long) channel.readOutbound());
         assertEquals(2L, (long) channel.readOutbound());
@@ -295,13 +303,10 @@ public class PendingWriteQueueTest {
         });
         ChannelPromise promise2 = channel.newPromise();
         promise2.addListener((ChannelFutureListener) future -> failOrder.add(2));
-        channel.eventLoop().execute(new Runnable() {
-            @Override
-            public void run() {
-                queue.add(1L, promise);
-                queue.add(2L, promise2);
-                queue.removeAndFailAll(new Exception());
-            }
+        channel.eventLoop().execute(() -> {
+            queue.add(1L, promise);
+            queue.add(2L, promise2);
+            queue.removeAndFailAll(new Exception());
         });
 
         assertTrue(promise.isDone());

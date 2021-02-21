@@ -5,7 +5,7 @@
  * "License"); you may not use this file except in compliance with the License. You may obtain a
  * copy of the License at:
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ * https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software distributed under the License
  * is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
@@ -212,8 +212,8 @@ public class DefaultHttp2ConnectionDecoder implements Http2ConnectionDecoder {
 
     void onGoAwayRead0(ChannelHandlerContext ctx, int lastStreamId, long errorCode, ByteBuf debugData)
             throws Http2Exception {
-        connection.goAwayReceived(lastStreamId, errorCode, debugData);
         listener.onGoAwayRead(ctx, lastStreamId, errorCode, debugData);
+        connection.goAwayReceived(lastStreamId, errorCode, debugData);
     }
 
     void onUnknownFrame0(ChannelHandlerContext ctx, byte frameType, int streamId, Http2Flags flags,
@@ -496,10 +496,6 @@ public class DefaultHttp2ConnectionDecoder implements Http2ConnectionDecoder {
 
             if (shouldIgnoreHeadersOrDataFrame(ctx, streamId, parentStream, "PUSH_PROMISE")) {
                 return;
-            }
-
-            if (parentStream == null) {
-                throw connectionError(PROTOCOL_ERROR, "Stream %d does not exist", streamId);
             }
 
             switch (parentStream.state()) {

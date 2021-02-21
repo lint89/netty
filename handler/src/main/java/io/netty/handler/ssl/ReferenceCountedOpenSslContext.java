@@ -5,7 +5,7 @@
  * version 2.0 (the "License"); you may not use this file except in compliance
  * with the License. You may obtain a copy of the License at:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
@@ -90,6 +90,18 @@ public abstract class ReferenceCountedOpenSslContext extends SslContext implemen
 
     // TODO: Maybe make configurable ?
     protected static final int VERIFY_DEPTH = 10;
+
+    static final boolean CLIENT_ENABLE_SESSION_TICKET =
+            SystemPropertyUtil.getBoolean("jdk.tls.client.enableSessionTicketExtension", false);
+
+    static final boolean CLIENT_ENABLE_SESSION_TICKET_TLSV13 =
+            SystemPropertyUtil.getBoolean("jdk.tls.client.enableSessionTicketExtension", true);
+
+    static final boolean SERVER_ENABLE_SESSION_TICKET =
+            SystemPropertyUtil.getBoolean("jdk.tls.server.enableSessionTicketExtension", false);
+
+     static final boolean SERVER_ENABLE_SESSION_TICKET_TLSV13 =
+            SystemPropertyUtil.getBoolean("jdk.tls.server.enableSessionTicketExtension", true);
 
     /**
      * The OpenSSL SSL_CTX object.
@@ -217,10 +229,12 @@ public abstract class ReferenceCountedOpenSslContext extends SslContext implemen
         // Create a new SSL_CTX and configure it.
         boolean success = false;
         try {
+            boolean tlsv13Supported = OpenSsl.isTlsv13Supported();
+
             try {
                 int protocolOpts = SSL.SSL_PROTOCOL_SSLV3 | SSL.SSL_PROTOCOL_TLSV1 |
                                    SSL.SSL_PROTOCOL_TLSV1_1 | SSL.SSL_PROTOCOL_TLSV1_2;
-                if (OpenSsl.isTlsv13Supported()) {
+                if (tlsv13Supported) {
                     protocolOpts |= SSL.SSL_PROTOCOL_TLSV1_3;
                 }
                 ctx = SSLContext.make(protocolOpts, mode);
@@ -228,7 +242,6 @@ public abstract class ReferenceCountedOpenSslContext extends SslContext implemen
                 throw new SSLException("failed to create an SSL_CTX", e);
             }
 
-            boolean tlsv13Supported = OpenSsl.isTlsv13Supported();
             StringBuilder cipherBuilder = new StringBuilder();
             StringBuilder cipherTLSv13Builder = new StringBuilder();
 
@@ -261,9 +274,6 @@ public abstract class ReferenceCountedOpenSslContext extends SslContext implemen
             int options = SSLContext.getOptions(ctx) |
                           SSL.SSL_OP_NO_SSLv2 |
                           SSL.SSL_OP_NO_SSLv3 |
-                          // Disable TLSv1.3 by default for now. Even if TLSv1.3 is not supported this will
-                          // work fine as in this case SSL_OP_NO_TLSv1_3 will be 0.
-                          SSL.SSL_OP_NO_TLSv1_3 |
 
                           SSL.SSL_OP_CIPHER_SERVER_PREFERENCE |
 
@@ -528,8 +538,7 @@ public abstract class ReferenceCountedOpenSslContext extends SslContext implemen
         }
     }
 
-    // Exposed for testing only
-    final void setUseTasks(boolean useTasks) {
+    public final void setUseTasks(boolean useTasks) {
         Lock writerLock = ctxLock.writeLock();
         writerLock.lock();
         try {

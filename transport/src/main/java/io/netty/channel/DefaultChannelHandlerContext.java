@@ -5,7 +5,7 @@
  * version 2.0 (the "License"); you may not use this file except in compliance
  * with the License. You may obtain a copy of the License at:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
@@ -51,9 +51,14 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
     private static final int ADD_COMPLETE = 1;
 
     /**
+     * {@link ChannelHandler#handlerRemoved(ChannelHandlerContext)} is about to be called.
+     */
+    private static final int REMOVE_STARTED = 2;
+
+    /**
      * {@link ChannelHandler#handlerRemoved(ChannelHandlerContext)} was called.
      */
-    private static final int REMOVE_COMPLETE = 2;
+    private static final int REMOVE_COMPLETE = 3;
 
     private final int executionMask;
     private final DefaultChannelPipeline pipeline;
@@ -63,10 +68,10 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
     // Lazily instantiated tasks used to trigger events to a handler with different executor.
     // There is no need to make this volatile as at worse it will just create a few more instances then needed.
     private Tasks invokeTasks;
+    private int handlerState = INIT;
 
     DefaultChannelHandlerContext next;
     DefaultChannelHandlerContext prev;
-    private int handlerState = INIT;
 
     DefaultChannelHandlerContext(DefaultChannelPipeline pipeline, String name,
                                  ChannelHandler handler) {
@@ -74,6 +79,22 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
         this.pipeline = pipeline;
         this.executionMask = mask(handler.getClass());
         this.handler = handler;
+    }
+
+    private static void failRemoved(DefaultChannelHandlerContext ctx, ChannelPromise promise) {
+        promise.setFailure(newRemovedException(ctx, null));
+    }
+
+    private void notifyHandlerRemovedAlready() {
+        notifyHandlerRemovedAlready(null);
+    }
+
+    private void notifyHandlerRemovedAlready(Throwable cause) {
+        pipeline().fireExceptionCaught(newRemovedException(this, cause));
+    }
+
+    private static ChannelPipelineException newRemovedException(ChannelHandlerContext ctx, Throwable cause) {
+        return new ChannelPipelineException("Context " + ctx + " already removed", cause);
     }
 
     private Tasks invokeTasks() {
@@ -126,14 +147,19 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
     }
 
     private void findAndInvokeChannelRegistered() {
-        findContextInbound(MASK_CHANNEL_REGISTERED).invokeChannelRegistered();
+        DefaultChannelHandlerContext ctx = findContextInbound(MASK_CHANNEL_REGISTERED);
+        if (ctx == null) {
+            notifyHandlerRemovedAlready();
+            return;
+        }
+        ctx.invokeChannelRegistered();
     }
 
     void invokeChannelRegistered() {
         try {
             handler().channelRegistered(this);
         } catch (Throwable t) {
-            notifyHandlerException(t);
+            invokeExceptionCaught(t);
         }
     }
 
@@ -149,14 +175,19 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
     }
 
     private void findAndInvokeChannelUnregistered() {
-        findContextInbound(MASK_CHANNEL_UNREGISTERED).invokeChannelUnregistered();
+        DefaultChannelHandlerContext ctx = findContextInbound(MASK_CHANNEL_UNREGISTERED);
+        if (ctx == null) {
+            notifyHandlerRemovedAlready();
+            return;
+        }
+        ctx.invokeChannelUnregistered();
     }
 
     void invokeChannelUnregistered() {
         try {
             handler().channelUnregistered(this);
         } catch (Throwable t) {
-            notifyHandlerException(t);
+            invokeExceptionCaught(t);
         }
     }
 
@@ -172,14 +203,19 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
     }
 
     private void findAndInvokeChannelActive() {
-        findContextInbound(MASK_CHANNEL_ACTIVE).invokeChannelActive();
+        DefaultChannelHandlerContext ctx = findContextInbound(MASK_CHANNEL_ACTIVE);
+        if (ctx == null) {
+            notifyHandlerRemovedAlready();
+            return;
+        }
+        ctx.invokeChannelActive();
     }
 
     void invokeChannelActive() {
         try {
             handler().channelActive(this);
         } catch (Throwable t) {
-            notifyHandlerException(t);
+            invokeExceptionCaught(t);
         }
     }
 
@@ -195,14 +231,19 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
     }
 
     private void findAndInvokeChannelInactive() {
-        findContextInbound(MASK_CHANNEL_INACTIVE).invokeChannelInactive();
+        DefaultChannelHandlerContext ctx = findContextInbound(MASK_CHANNEL_INACTIVE);
+        if (ctx == null) {
+            notifyHandlerRemovedAlready();
+            return;
+        }
+        ctx.invokeChannelInactive();
     }
 
     void invokeChannelInactive() {
         try {
             handler().channelInactive(this);
         } catch (Throwable t) {
-            notifyHandlerException(t);
+            invokeExceptionCaught(t);
         }
     }
 
@@ -226,7 +267,12 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
     }
 
     private void findAndInvokeExceptionCaught(Throwable cause) {
-        findContextInbound(MASK_EXCEPTION_CAUGHT).invokeExceptionCaught(cause);
+        DefaultChannelHandlerContext ctx = findContextInbound(MASK_EXCEPTION_CAUGHT);
+        if (ctx == null) {
+            notifyHandlerRemovedAlready(cause);
+            return;
+        }
+        ctx.invokeExceptionCaught(cause);
     }
 
     void invokeExceptionCaught(final Throwable cause) {
@@ -261,14 +307,20 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
     }
 
     private void findAndInvokeUserEventTriggered(Object event) {
-        findContextInbound(MASK_USER_EVENT_TRIGGERED).invokeUserEventTriggered(event);
+        DefaultChannelHandlerContext ctx = findContextInbound(MASK_USER_EVENT_TRIGGERED);
+        if (ctx == null) {
+            ReferenceCountUtil.release(event);
+            notifyHandlerRemovedAlready();
+            return;
+        }
+        ctx.invokeUserEventTriggered(event);
     }
 
     void invokeUserEventTriggered(Object event) {
         try {
             handler().userEventTriggered(this, event);
         } catch (Throwable t) {
-            notifyHandlerException(t);
+            invokeExceptionCaught(t);
         }
     }
 
@@ -290,7 +342,13 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
     }
 
     private void findAndInvokeChannelRead(Object msg) {
-        findContextInbound(MASK_CHANNEL_READ).invokeChannelRead(msg);
+        DefaultChannelHandlerContext ctx = findContextInbound(MASK_CHANNEL_READ);
+        if (ctx == null) {
+            ReferenceCountUtil.release(msg);
+            notifyHandlerRemovedAlready();
+            return;
+        }
+        ctx.invokeChannelRead(msg);
     }
 
     void invokeChannelRead(Object msg) {
@@ -298,7 +356,7 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
         try {
             handler().channelRead(this, m);
         } catch (Throwable t) {
-            notifyHandlerException(t);
+            invokeExceptionCaught(t);
         }
     }
 
@@ -315,14 +373,19 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
     }
 
     private void findAndInvokeChannelReadComplete() {
-        findContextInbound(MASK_CHANNEL_READ_COMPLETE).invokeChannelReadComplete();
+        DefaultChannelHandlerContext ctx = findContextInbound(MASK_CHANNEL_READ_COMPLETE);
+        if (ctx == null) {
+            notifyHandlerRemovedAlready();
+            return;
+        }
+        ctx.invokeChannelReadComplete();
     }
 
     void invokeChannelReadComplete() {
         try {
             handler().channelReadComplete(this);
         } catch (Throwable t) {
-            notifyHandlerException(t);
+            invokeExceptionCaught(t);
         }
     }
 
@@ -339,14 +402,19 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
     }
 
     private void findAndInvokeChannelWritabilityChanged() {
-        findContextInbound(MASK_CHANNEL_WRITABILITY_CHANGED).invokeChannelWritabilityChanged();
+        DefaultChannelHandlerContext ctx = findContextInbound(MASK_CHANNEL_WRITABILITY_CHANGED);
+        if (ctx == null) {
+            notifyHandlerRemovedAlready();
+            return;
+        }
+        ctx.invokeChannelWritabilityChanged();
     }
 
     void invokeChannelWritabilityChanged() {
         try {
             handler().channelWritabilityChanged(this);
         } catch (Throwable t) {
-            notifyHandlerException(t);
+            invokeExceptionCaught(t);
         }
     }
 
@@ -403,7 +471,12 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
     }
 
     private void findAndInvokeBind(SocketAddress localAddress, ChannelPromise promise) {
-        findContextOutbound(MASK_BIND).invokeBind(localAddress, promise);
+        DefaultChannelHandlerContext ctx = findContextOutbound(MASK_BIND);
+        if (ctx == null) {
+            failRemoved(this, promise);
+            return;
+        }
+        ctx.invokeBind(localAddress, promise);
     }
 
     private void invokeBind(SocketAddress localAddress, ChannelPromise promise) {
@@ -438,7 +511,12 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
     }
 
     private void findAndInvokeConnect(SocketAddress remoteAddress, SocketAddress localAddress, ChannelPromise promise) {
-        findContextOutbound(MASK_CONNECT).invokeConnect(remoteAddress, localAddress, promise);
+        DefaultChannelHandlerContext ctx = findContextOutbound(MASK_CONNECT);
+        if (ctx == null) {
+            failRemoved(this, promise);
+            return;
+        }
+        ctx.invokeConnect(remoteAddress, localAddress, promise);
     }
 
     private void invokeConnect(SocketAddress remoteAddress, SocketAddress localAddress, ChannelPromise promise) {
@@ -472,7 +550,12 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
     }
 
     private void findAndInvokeDisconnect(ChannelPromise promise) {
-        findContextOutbound(MASK_DISCONNECT).invokeDisconnect(promise);
+        DefaultChannelHandlerContext ctx = findContextOutbound(MASK_DISCONNECT);
+        if (ctx == null) {
+            failRemoved(this, promise);
+            return;
+        }
+        ctx.invokeDisconnect(promise);
     }
 
     private void invokeDisconnect(ChannelPromise promise) {
@@ -500,7 +583,12 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
     }
 
     private void findAndInvokeClose(ChannelPromise promise) {
-        findContextOutbound(MASK_CLOSE).invokeClose(promise);
+        DefaultChannelHandlerContext ctx = findContextOutbound(MASK_CLOSE);
+        if (ctx == null) {
+            failRemoved(this, promise);
+            return;
+        }
+        ctx.invokeClose(promise);
     }
 
     private void invokeClose(ChannelPromise promise) {
@@ -528,7 +616,12 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
     }
 
     private void findAndInvokeRegister(ChannelPromise promise) {
-        findContextOutbound(MASK_REGISTER).invokeRegister(promise);
+        DefaultChannelHandlerContext ctx = findContextOutbound(MASK_REGISTER);
+        if (ctx == null) {
+            failRemoved(this, promise);
+            return;
+        }
+        ctx.invokeRegister(promise);
     }
 
     private void invokeRegister(ChannelPromise promise) {
@@ -556,7 +649,12 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
     }
 
     private void findAndInvokeDeregister(ChannelPromise promise) {
-        findContextOutbound(MASK_DEREGISTER).invokeDeregister(promise);
+        DefaultChannelHandlerContext ctx = findContextOutbound(MASK_DEREGISTER);
+        if (ctx == null) {
+            failRemoved(this, promise);
+            return;
+        }
+        ctx.invokeDeregister(promise);
     }
 
     private void invokeDeregister(ChannelPromise promise) {
@@ -580,7 +678,10 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
     }
 
     private void findAndInvokeRead() {
-        findContextOutbound(MASK_READ).invokeRead();
+        DefaultChannelHandlerContext ctx = findContextOutbound(MASK_READ);
+        if (ctx != null) {
+            ctx.invokeRead();
+        }
     }
 
     private void invokeRead() {
@@ -593,9 +694,14 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
 
     private void invokeExceptionCaughtFromOutbound(Throwable t) {
         if ((executionMask & MASK_EXCEPTION_CAUGHT) != 0) {
-            notifyHandlerException(t);
+            invokeExceptionCaught(t);
         } else {
-            findContextInbound(MASK_EXCEPTION_CAUGHT).notifyHandlerException(t);
+            DefaultChannelHandlerContext ctx = findContextInbound(MASK_EXCEPTION_CAUGHT);
+            if (ctx == null) {
+                notifyHandlerRemovedAlready();
+                return;
+            }
+            ctx.invokeExceptionCaught(t);
         }
     }
 
@@ -634,7 +740,10 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
     }
 
     private void findAndInvokeFlush() {
-        findContextOutbound(MASK_FLUSH).invokeFlush();
+        DefaultChannelHandlerContext ctx = findContextOutbound(MASK_FLUSH);
+        if (ctx != null) {
+            ctx.invokeFlush();
+        }
     }
 
     private void invokeFlush() {
@@ -673,6 +782,11 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
         if (executor.inEventLoop()) {
             final DefaultChannelHandlerContext next = findContextOutbound(flush ?
                     (MASK_WRITE | MASK_FLUSH) : MASK_WRITE);
+            if (next == null) {
+                ReferenceCountUtil.release(msg);
+                failRemoved(this, promise);
+                return;
+            }
             if (flush) {
                 next.invokeWriteAndFlush(msg, promise);
             } else {
@@ -704,39 +818,6 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
         // Only log if the given promise is not of type VoidChannelPromise as tryFailure(...) is expected to return
         // false.
         PromiseNotificationUtil.tryFailure(promise, cause, promise instanceof VoidChannelPromise ? null : logger);
-    }
-
-    private void notifyHandlerException(Throwable cause) {
-        if (inExceptionCaught(cause)) {
-            if (logger.isWarnEnabled()) {
-                logger.warn(
-                        "An exception was thrown by a user handler " +
-                                "while handling an exceptionCaught event", cause);
-            }
-            return;
-        }
-
-        invokeExceptionCaught(cause);
-    }
-
-    private static boolean inExceptionCaught(Throwable cause) {
-        do {
-            StackTraceElement[] trace = cause.getStackTrace();
-            if (trace != null) {
-                for (StackTraceElement t : trace) {
-                    if (t == null) {
-                        break;
-                    }
-                    if ("exceptionCaught".equals(t.getMethodName())) {
-                        return true;
-                    }
-                }
-            }
-
-            cause = cause.getCause();
-        } while (cause != null);
-
-        return false;
     }
 
     @Override
@@ -796,17 +877,23 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
 
     private DefaultChannelHandlerContext findContextInbound(int mask) {
         DefaultChannelHandlerContext ctx = this;
+        if (ctx.next == null) {
+            return null;
+        }
         do {
             ctx = ctx.next;
-        } while ((ctx.executionMask & mask) == 0);
+        } while ((ctx.executionMask & mask) == 0 || ctx.handlerState == REMOVE_STARTED);
         return ctx;
     }
 
     private DefaultChannelHandlerContext findContextOutbound(int mask) {
         DefaultChannelHandlerContext ctx = this;
+        if (ctx.prev == null) {
+            return null;
+        }
         do {
             ctx = ctx.prev;
-        } while ((ctx.executionMask & mask) == 0);
+        } while ((ctx.executionMask & mask) == 0 || ctx.handlerState == REMOVE_STARTED);
         return ctx;
     }
 
@@ -815,15 +902,11 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
         return channel().voidPromise();
     }
 
-    private void setRemoved() {
-        handlerState = REMOVE_COMPLETE;
-    }
-
     boolean setAddComplete() {
         // Ensure we never update when the handlerState is REMOVE_COMPLETE already.
         // oldState is usually ADD_PENDING but can also be REMOVE_COMPLETE when an EventExecutor is used that is not
         // exposing ordering guarantees.
-        if (handlerState != REMOVE_COMPLETE) {
+        if (handlerState == INIT) {
             handlerState = ADD_COMPLETE;
             return true;
         }
@@ -842,17 +925,36 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
         try {
             // Only call handlerRemoved(...) if we called handlerAdded(...) before.
             if (handlerState == ADD_COMPLETE) {
+                handlerState = REMOVE_STARTED;
                 handler().handlerRemoved(this);
             }
         } finally {
             // Mark the handler as removed in any case.
-            setRemoved();
+            handlerState = REMOVE_COMPLETE;
         }
     }
 
     @Override
     public boolean isRemoved() {
         return handlerState == REMOVE_COMPLETE;
+    }
+
+    void remove(boolean relink) {
+        assert handlerState == REMOVE_COMPLETE;
+        if (relink) {
+            DefaultChannelHandlerContext prev = this.prev;
+            DefaultChannelHandlerContext next = this.next;
+            // prev and next may be null if the handler was never really added to the pipeline
+            if (prev != null) {
+                prev.next = next;
+            }
+            if (next != null) {
+                next.prev = prev;
+            }
+        }
+
+        this.prev = null;
+        this.next = null;
     }
 
     @Override
@@ -871,11 +973,11 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
             return true;
         } catch (Throwable cause) {
             try {
-                promise.setFailure(cause);
-            } finally {
                 if (msg != null) {
                     ReferenceCountUtil.release(msg);
                 }
+            } finally {
+                promise.setFailure(cause);
             }
             return false;
         }
@@ -931,6 +1033,11 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
             try {
                 decrementPendingOutboundBytes();
                 DefaultChannelHandlerContext next = findContext(ctx);
+                if (next == null) {
+                    ReferenceCountUtil.release(msg);
+                    failRemoved(ctx, promise);
+                    return;
+                }
                 write(next, msg, promise);
             } finally {
                 recycle();
@@ -966,13 +1073,7 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
 
     static final class WriteTask extends AbstractWriteTask implements SingleThreadEventLoop.NonWakeupRunnable {
 
-        private static final ObjectPool<WriteTask> RECYCLER = ObjectPool.newPool(
-                new ObjectPool.ObjectCreator<WriteTask>() {
-            @Override
-            public WriteTask newObject(ObjectPool.Handle<WriteTask> handle) {
-                return new WriteTask(handle);
-            }
-        });
+        private static final ObjectPool<WriteTask> RECYCLER = ObjectPool.newPool(WriteTask::new);
 
         static WriteTask newInstance(
                 DefaultChannelHandlerContext ctx, Object msg, ChannelPromise promise) {
@@ -993,13 +1094,7 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
 
     static final class WriteAndFlushTask extends AbstractWriteTask {
 
-        private static final ObjectPool<WriteAndFlushTask> RECYCLER = ObjectPool.newPool(
-                new ObjectPool.ObjectCreator<WriteAndFlushTask>() {
-            @Override
-            public WriteAndFlushTask newObject(ObjectPool.Handle<WriteAndFlushTask> handle) {
-                return new WriteAndFlushTask(handle);
-            }
-        });
+        private static final ObjectPool<WriteAndFlushTask> RECYCLER = ObjectPool.newPool(WriteAndFlushTask::new);
 
         static WriteAndFlushTask newInstance(
                 DefaultChannelHandlerContext ctx, Object msg, ChannelPromise promise) {

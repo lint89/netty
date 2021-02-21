@@ -5,7 +5,7 @@
  * version 2.0 (the "License"); you may not use this file except in compliance
  * with the License. You may obtain a copy of the License at:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
@@ -16,8 +16,6 @@
 package io.netty.handler.ssl;
 
 import io.netty.internal.tcnative.CertificateCallback;
-import io.netty.util.internal.logging.InternalLogger;
-import io.netty.util.internal.logging.InternalLoggerFactory;
 import io.netty.internal.tcnative.SSL;
 import io.netty.internal.tcnative.SSLContext;
 
@@ -47,14 +45,14 @@ import javax.security.auth.x500.X500Principal;
  * {@link ReferenceCountedOpenSslEngine} is called which uses this class's JNI resources the JVM may crash.
  */
 public final class ReferenceCountedOpenSslClientContext extends ReferenceCountedOpenSslContext {
-    private static final InternalLogger logger =
-            InternalLoggerFactory.getInstance(ReferenceCountedOpenSslClientContext.class);
+
     private static final Set<String> SUPPORTED_KEY_TYPES = Collections.unmodifiableSet(new LinkedHashSet<>(
             Arrays.asList(OpenSslKeyMaterialManager.KEY_TYPE_RSA,
-                    OpenSslKeyMaterialManager.KEY_TYPE_DH_RSA,
-                    OpenSslKeyMaterialManager.KEY_TYPE_EC,
-                    OpenSslKeyMaterialManager.KEY_TYPE_EC_RSA,
-                    OpenSslKeyMaterialManager.KEY_TYPE_EC_EC)));
+                          OpenSslKeyMaterialManager.KEY_TYPE_DH_RSA,
+                          OpenSslKeyMaterialManager.KEY_TYPE_EC,
+                          OpenSslKeyMaterialManager.KEY_TYPE_EC_RSA,
+                          OpenSslKeyMaterialManager.KEY_TYPE_EC_EC)));
+
     private final OpenSslSessionContext sessionContext;
 
     ReferenceCountedOpenSslClientContext(X509Certificate[] trustCertCollection, TrustManagerFactory trustManagerFactory,
@@ -169,6 +167,9 @@ public final class ReferenceCountedOpenSslClientContext extends ReferenceCounted
                 throw new SSLException("unable to setup trustmanager", e);
             }
             OpenSslClientSessionContext context = new OpenSslClientSessionContext(thiz, keyMaterialProvider);
+            if (CLIENT_ENABLE_SESSION_TICKET) {
+                context.setTicketKeys();
+            }
             keyMaterialProvider = null;
             return context;
         } finally {
@@ -279,8 +280,11 @@ public final class ReferenceCountedOpenSslClientContext extends ReferenceCounted
                 }
                 keyManagerHolder.setKeyMaterialClientSide(engine, keyTypes, issuers);
             } catch (Throwable cause) {
-                logger.debug("request of key failed", cause);
                 engine.initHandshakeException(cause);
+                if (cause instanceof Exception) {
+                    throw (Exception) cause;
+                }
+                throw new SSLException(cause);
             }
         }
 
@@ -310,7 +314,7 @@ public final class ReferenceCountedOpenSslClientContext extends ReferenceCounted
         }
 
         private static String clientKeyType(byte clientCertificateType) {
-            // See also http://www.ietf.org/assignments/tls-parameters/tls-parameters.xml
+            // See also https://www.ietf.org/assignments/tls-parameters/tls-parameters.xml
             switch (clientCertificateType) {
                 case CertificateCallback.TLS_CT_RSA_SIGN:
                     return OpenSslKeyMaterialManager.KEY_TYPE_RSA; // RFC rsa_sign

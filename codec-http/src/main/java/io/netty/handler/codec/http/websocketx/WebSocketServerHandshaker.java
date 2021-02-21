@@ -5,7 +5,7 @@
  * version 2.0 (the "License"); you may not use this file except in compliance
  * with the License. You may obtain a copy of the License at:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
@@ -300,9 +300,9 @@ public abstract class WebSocketServerHandshaker {
             @Override
             public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
                 // Remove ourself and fail the handshake promise.
-                ctx.pipeline().remove(this);
                 promise.tryFailure(cause);
                 ctx.fireExceptionCaught(cause);
+                ctx.pipeline().remove(this);
             }
 
             @Override
